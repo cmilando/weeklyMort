@@ -111,7 +111,8 @@ m1.mod <- gnm(sim_death ~ gt40 +
               data = phx,
               family = quasipoisson)
 
-m1.mod
+coef(m1.mod )[1:2]
+exp(coef(m1.mod )[1:2])
 
 # =============================================================================
 # /////////////////////////////////////////////////////////////////////////////
@@ -122,12 +123,12 @@ m1.mod
 # /////////////////////////////////////////////////////////////////////////////
 # =============================================================================
 
-beta_covid = log(2)
+beta_covid_add = log(2)
 
 phx[, is_covid_year := year(dt_fmt) %in% c(2020, 2021)]
 
 phx[, sim_death_t1 := sim_death_baseline * 
-      exp(gt40 * beta_temp + is_covid_year * beta_covid)
+      exp(gt40 * beta_temp + is_covid_year * beta_covid_add)
 ]
 
 # plot
@@ -152,3 +153,61 @@ m1.t1 <- gnm(sim_death_t1 ~ gt40 +
 coef(m1.t1 )[1:2]
 exp(coef(m1.t1 )[1:2])
  
+# ----
+# RESULT IS
+# if covid effect is additive ONLY
+# the time-series method adjusts properly without needing a COVID factor
+# wherease the time-sratified by month-county-year
+# does not
+#
+# -----
+
+
+# =============================================================================
+# /////////////////////////////////////////////////////////////////////////////
+# TRIAL # 2: COVID EFFECT IS MULTIPLICATIVE
+#
+# log(death) = log(baseline) + 
+#              beta_temp * gt40 * (1 - is_covid_yr) + 
+#              beta_covid * gt40 * (is_covid_yr)
+#
+# /////////////////////////////////////////////////////////////////////////////
+# =============================================================================
+
+beta_covid_mult = log(3)
+
+phx[, sim_death_t2 := sim_death_baseline * 
+      exp(gt40 * beta_temp +
+            is_covid_year * (beta_covid_add + gt40 * beta_covid_mult))
+]
+
+# plot
+ggplot(subset(phx, year(dt_fmt) == 2020)) +
+  geom_line(aes(x = dt_fmt, y = sim_death_baseline), col = 'grey') +
+  geom_line(aes(x = dt_fmt, y = sim_death_t2)) +
+  geom_point(aes(x = dt_fmt, y = sim_death_t2, color = factor(gt40)))
+
+#
+m1.t2 <- gnm(sim_death_t2 ~ gt40 * is_covid_year + 
+               ns(dt_fmt,df = df_per_year * nyears), 
+             data = phx,
+             family = quasipoisson)
+
+coef(m1.t2 )[1:4]
+exp(coef(m1.t2 )[1:4])
+
+#
+m1.t2b <- gnm(sim_death_t2 ~ gt40  + 
+               ns(dt_fmt,df = df_per_year * nyears), 
+             data = phx,
+             family = quasipoisson)
+
+coef(m1.t2b )[1:2]
+exp(coef(m1.t2b )[1:2])
+
+# ----
+# RESULT IS
+# if covid effect is additive AND multiplicative
+# you need to add an interaction term with is_covid_year
+#
+# -----
