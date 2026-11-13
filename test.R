@@ -211,3 +211,29 @@ exp(coef(m1.t2b )[1:2])
 # you need to add an interaction term with is_covid_year
 #
 # -----
+
+# =============================================================================
+# /////////////////////////////////////////////////////////////////////////////
+# TRIAL # 3: THERE IS HOPE
+#
+# log(death) = log(baseline) + 
+#              beta_temp * gt40 * (1 - is_covid_yr) + 
+#              beta_covid * gt40 * (is_covid_yr)
+#
+# /////////////////////////////////////////////////////////////////////////////
+# =============================================================================
+
+m1.x1 <- gnm(X_deaths ~  gt40 * is_covid_year +
+                ns(dt_fmt,df = df_per_year * nyears), 
+              data = phx,
+              family = quasipoisson)
+
+exp(confint(m1.x1))
+
+
+m1.x1b <- gnm(X_deaths ~  gt40  +
+               ns(dt_fmt,df = df_per_year * nyears), 
+             data = phx,
+             family = quasipoisson)
+
+exp(coef(m1.x1)[1:2])
