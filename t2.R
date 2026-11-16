@@ -9,9 +9,7 @@ df <- read.csv("heat_mortality_asofnov6.csv")
 setDT(df)
 
 # get rid of low pop
-df <- subset(df, population_estimate > 100000)
-
-
+df <- subset(df, population_estimate >= 1e5)
 
 # set X_deaths NA to 0
 rr <- which(is.na(df$X_deaths))
@@ -20,18 +18,40 @@ df$X_deaths[rr] = 0
 # make FIPS
 df[, fips := sprintf("%05s", occurrence_county_code)]
 
+# get NCA4 Region
+get_region <- function(STATE_COUNTY_FIPS) {
+  
+  STATE = substr(STATE_COUNTY_FIPS, 1, 2)
+  NE <- c('23', '33', '50', '25', '44', '09', '36', '42', 
+          '34', '10', '24', '42', '54', '11' )
+  MW <- c("27", "55", "26", "19", "29", "17", "18", "39")
+  NW <- c("53", "41", "16")
+  NGP <- c('30', '56', '38', '46', '31')
+  SGP <- c('20', '40', '48')
+  SW <- c('06', '32', '49', '04', '08', '35')
+  SE <- c('51', '37', '21', '47', '05', '22', '28',
+          '01', '13', '45', 12)
+  
+  if(STATE %in% NE) return('NE')
+  if(STATE %in% MW) return('MW')
+  if(STATE %in% NW) return('NW')
+  if(STATE %in% NGP) return('NGP')
+  if(STATE %in% SGP) return('SGP')
+  if(STATE %in% SW) return('SW')
+  if(STATE %in% SE) return('SE')
+  return('Other')
+  
+}
+df$NCAregion <- sapply(df$fips, get_region)
+
 # make strata
 df[, dt_fmt := as.IDate(X_week_end_date)]
-df[, stratum := paste0(fips,".", 
-                      year(dt_fmt), ".",
-                      month(dt_fmt))]
-
-#
-# just 2018 and 2019
-df <- subset(df, year(dt_fmt) < 2020)
-
-# 
+df[, dt_int := as.integer(dt_fmt)]
+df[, stratum := paste0(fips,".", year(dt_fmt), ".", month(dt_fmt))]
 df[, state_fips := substr(fips, 1, 2)]
+
+# just 2018 and 2019
+# df <- subset(df, year(dt_fmt) < 2020)
 unique_states <- unique(df$state_fips)
 unique_states
 
@@ -49,21 +69,27 @@ for(ii in 1:length(unique_states)) {
   
   state_df <- subset(df, grepl(paste0("^", unique_states[ii]), fips))
   state_df <- setDT(state_df)
-  unique(state_df$fips)
+  n_counties <- length(unique(state_df$fips))
   
   # make some additional variables
   state_df[, log_pop := log(population_estimate)]
   state_df[, yday := yday(dt_fmt)]
   state_df[, is_covid_year := year(dt_fmt) %in% c(2020, 2021)]
   
+  # make the exposure var a percentile
+  ref_years = 2018:2025
+  ref_ecdf <- ecdf(subset(state_df, year(dt_fmt) %in% ref_years)$max_temp_C)
+  state_df[, exp_percentile := ref_ecdf(max_temp_C)]
+  
   # make crossbasis
-  qEXP <- quantile(state_df$max_temp_C, probs = c(10, 50, 90)/100)
-
+  qEXP <- quantile(state_df$exp_percentile, probs = c(10, 75, 90)/100)
+  qEXP
+  
   cb.1 <- crossbasis(
-    x = state_df$max_temp_C,
-    argvar = list(fun = 'ns', knots = qEXP),
-    arglag = list(fun = 'poly', 2),
-    lag = 4, # because its weekly
+    x = state_df$exp_percentile,
+    argvar = list(fun = 'bs', knots = qEXP, degree = 2),
+    arglag = list(fun = 'ns'),
+    lag = 3, # because its weekly
     group = state_df$fips) # because you are trying this in a 1-stage
   
   # make the interaction terms
@@ -72,12 +98,14 @@ for(ii in 1:length(unique_states)) {
   covid.int
   
   # get the spline DF
+  unique(year(state_df$dt_fmt))
   nyears = length(unique(year(state_df$dt_fmt)))
   nyears
   df_per_year = 8
   
   # run the CP model
   state_df[,  keep:=sum(X_deaths)>0, by=stratum]
+  
   m0.cp <- gnm(X_deaths ~  cb.1, 
                eliminate = factor(stratum),
                subset = keep,
@@ -89,8 +117,7 @@ for(ii in 1:length(unique_states)) {
   
   
   # run the baseline time-series model
-  m1.x1 <- gnm(X_deaths ~  cb.1 +
-                 ns(dt_fmt, df = df_per_year * nyears), 
+  m1.x1 <- gnm(X_deaths ~  cb.1 + ns(dt_int, df = df_per_year * nyears), 
                data = state_df,
                offset = log_pop,
                family = quasipoisson)
@@ -103,9 +130,6 @@ for(ii in 1:length(unique_states)) {
   
   cp.1.int = crosspred(cb.1, m1.int1, cen = qEXP[2])
 
-
-
-  
   # Extract predictions
   dt0 <- data.table(
     temp = cp.0$predvar,
@@ -143,13 +167,14 @@ for(ii in 1:length(unique_states)) {
     scale_color_manual(values = col) +
     scale_fill_manual(values = col) +
     scale_y_log10() +
-    coord_cartesian(ylim = c(0.5, 10), 
-                    xlim = c(min(state_df$max_temp_C),
-                             max(state_df$max_temp_C))) +
+    # coord_cartesian(ylim = c(0.5, 10), 
+    #                 xlim = c(min(state_df$max_temp_C),
+    #                          max(state_df$max_temp_C))) +
     labs(
-      x = expression(paste("Temperature (" * degree * "C)")),
+      # x = expression(paste("Temperature (" * degree * "C)")),
       y = "RR",
-      title = paste0(ii, " - ", state_df$stname[1]),
+      title = paste0(state_df$stname[1], " (",
+                     n_counties, " Counties)"),
       color = NULL,
       fill = NULL
     ) +
@@ -160,6 +185,8 @@ for(ii in 1:length(unique_states)) {
       legend.title = element_blank(),
       plot.title = element_text(hjust = 0.5)
     )
+  
+  pX
   
   plotlist[[ii]] <- pX
 
