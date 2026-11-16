@@ -11,6 +11,8 @@ setDT(df)
 # get rid of low pop
 df <- subset(df, population_estimate > 100000)
 
+
+
 # set X_deaths NA to 0
 rr <- which(is.na(df$X_deaths))
 df$X_deaths[rr] = 0
@@ -23,6 +25,10 @@ df[, dt_fmt := as.IDate(X_week_end_date)]
 df[, stratum := paste0(fips,".", 
                       year(dt_fmt), ".",
                       month(dt_fmt))]
+
+#
+# just 2018 and 2019
+df <- subset(df, year(dt_fmt) < 2020)
 
 # 
 df[, state_fips := substr(fips, 1, 2)]
@@ -79,6 +85,8 @@ for(ii in 1:length(unique_states)) {
                offset = log_pop,
                family = quasipoisson)
   
+  cp.0 = crosspred(cb.1, m0.cp, cen = qEXP[2])
+  
   
   # run the baseline time-series model
   m1.x1 <- gnm(X_deaths ~  cb.1 +
@@ -87,30 +95,32 @@ for(ii in 1:length(unique_states)) {
                offset = log_pop,
                family = quasipoisson)
   
-  # run the model
-  m1.x1 <- gnm(X_deaths ~  cb.1 +
-                 ns(dt_fmt, df = df_per_year * nyears), 
-               data = state_df,
-               offset = log_pop,
-               family = quasipoisson)
+  cp.1 = crosspred(cb.1, m1.x1, cen = qEXP[2])
   
-  # update with the interaction term
+  # run the interaction model
   m1.int1 <- update(m1.x1, .~. + is_covid_yearTRUE + covid.int)
   m1.int1
   
-  # look at crosspred
-  cp.1 = crosspred(cb.1, m1.x1, cen = qEXP[2])
-
-  # check against interaction term model
   cp.1.int = crosspred(cb.1, m1.int1, cen = qEXP[2])
+
+
+
   
   # Extract predictions
+  dt0 <- data.table(
+    temp = cp.0$predvar,
+    RR = cp.0$allRRfit,
+    lower = cp.0$allRRlow,
+    upper = cp.0$allRRhigh,
+    model = "Time-StratCP"
+  )
+  
   dt1 <- data.table(
     temp = cp.1$predvar,
     RR = cp.1$allRRfit,
     lower = cp.1$allRRlow,
     upper = cp.1$allRRhigh,
-    model = "Baseline"
+    model = "TS Baseline"
   )
   
   dt2 <- data.table(
@@ -118,11 +128,11 @@ for(ii in 1:length(unique_states)) {
     RR = cp.1.int$allRRfit,
     lower = cp.1.int$allRRlow,
     upper = cp.1.int$allRRhigh,
-    model = "w Interaction"
+    model = "TS w Interaction"
   )
   
-  dt <- rbind(dt1, dt2)
-  col <- c("royalblue", "tomato3")
+  dt <- rbind(dt0, dt1, dt2)
+  col <- c("forestgreen","royalblue", "tomato3")
   
   # Plot
   pX <- ggplot(dt, aes(x = temp, y = RR, color = model, fill = model)) +
