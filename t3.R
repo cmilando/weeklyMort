@@ -96,9 +96,27 @@ for(ii in 1:length(unique_states)) {
   state_df[,  strata_rat:= max(X_deaths, na.rm = T) / min(X_deaths, na.rm = T), by=stratum]
   state_df
   
+  state_df[,  strata_rat:= var(X_deaths, na.rm = T), by=stratum]
+  state_df
+  
+  # rate rank
+
+  state_df[,  rate_rank:= ecdf(strata_rat)(strata_rat), by=stratum]
+  state_df
+  
   state_df_agg <- state_df[, .(strata_rat = unique(strata_rat),
                                first_date = min(dt_fmt)), 
                                by = .(stratum, X_year, fips, month, population_estimate)]
+  
+  state_df_agg$strata_rat_rank = NA
+  
+  unique_fips <- unique(state_df$fips)
+  for(ii in 1:length(unique_fips)) {
+    fips_i = unique_fips[ii]
+    rr <- which(state_df_agg$fips == fips_i)
+    xecdf <- ecdf(state_df_agg$strata_rat[rr])
+    state_df_agg$strata_rat_rank[rr] =  xecdf(state_df_agg$strata_rat[rr])
+  }
   
   hist(state_df_agg$population_estimate)
   
@@ -117,24 +135,43 @@ for(ii in 1:length(unique_states)) {
   ggplot(state_df_agg) +
     geom_tile(aes(x = factor(first_date), 
                   y = reorder(fips, population_estimate) , 
-                  fill = strata_rat)) + 
+                  fill = strata_rat_rank)) + 
     scale_fill_viridis_c() +
     theme(axis.text.x = element_text(angle = 90, vjust = 0, size = 5)) +
-    facet_wrap(population_cut~.,nrow = 1, scales = 'free_x')
+    facet_wrap(population_cut ~ .,nrow = 3, scales = 'free_y')
   
   hist(state_df_agg$strata_rat)
   quantile(state_df_agg$strata_rat)
   
   hist(subset(state_df_agg, fips == '06037')$strata_rat)
   
-  ggplot(subset(state_df_agg, population_cut == 'med')) +
+  ggplot(subset(state_df_agg, strata_rat_rank > 0.9)) +
     geom_tile(aes(x = factor(first_date), 
                   y = reorder(fips, population_estimate) , 
-                  fill = strata_rat)) + 
-    scale_fill_viridis_c() +
+                  fill = strata_rat_rank)) + 
+    scale_fill_viridis_c(option = 'magma') +
     theme(axis.text.x = element_text(angle = 90, vjust = 0, size = 5)) +
-    facet_wrap(~X_year,nrow = 1, scales = 'free_x')
+    facet_wrap(population_cut~.,nrow = 3, scales = 'free_y')
   
+  # confirming when the COVID wave happened
+  xx <- subset(state_df, fips == '06037')
+  state_df_agg
+  xx <- state_df_agg[xx, on = .(fips, strata_rat)]
+  head(xx)
+  
+  p1 = ggplot(xx) + 
+    geom_line(aes(x = dt_fmt, y = X_deaths))
+  
+  p2 = ggplot(xx) + 
+    geom_line(aes(x = dt_fmt, 
+                   y = strata_rat_rank)) +
+    geom_point(aes(x = dt_fmt, 
+                  y = strata_rat_rank,
+                  color = cut(strata_rat_rank, 
+                              breaks = c(0, 0.95, 1))),
+               show.legend = F)
+  
+  p1 / p2
   
   state_df[,  
            keep:=(sum(X_deaths) > 0 & strata_rat < 1.2), 
