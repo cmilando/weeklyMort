@@ -93,10 +93,20 @@ for(ii in 1:length(unique_states)) {
     group = state_df$fips) # because you are trying this in a 1-stage
   
   # run the CP model
+  
+  # 
+  
   state_df[,  strata_rat:= max(X_deaths, na.rm = T) / min(X_deaths, na.rm = T), by=stratum]
   state_df
   
   state_df[,  strata_rat:= var(X_deaths, na.rm = T), by=stratum]
+  state_df
+  
+  ## 
+  # 4 point regression line
+  # standardize the slope coefficient / divided by the variance
+  # 
+  state_df[,  strata_rat:= coef(lm(X_deaths ~ dt_fmt))[2], by=stratum]
   state_df
   
   # rate rank
@@ -145,7 +155,7 @@ for(ii in 1:length(unique_states)) {
   
   hist(subset(state_df_agg, fips == '06037')$strata_rat)
   
-  ggplot(subset(state_df_agg, strata_rat_rank > 0.9)) +
+  ggplot(subset(state_df_agg, strata_rat_rank > 0.95)) +
     geom_tile(aes(x = factor(first_date), 
                   y = reorder(fips, population_estimate) , 
                   fill = strata_rat_rank)) + 
@@ -154,7 +164,7 @@ for(ii in 1:length(unique_states)) {
     facet_wrap(population_cut~.,nrow = 3, scales = 'free_y')
   
   # confirming when the COVID wave happened
-  xx <- subset(state_df, fips == '06037')
+  xx <- subset(state_df, fips == '06019')
   state_df_agg
   xx <- state_df_agg[xx, on = .(fips, strata_rat)]
   head(xx)
@@ -171,7 +181,14 @@ for(ii in 1:length(unique_states)) {
                               breaks = c(0, 0.95, 1))),
                show.legend = F)
   
-  p1 / p2
+  p3 = ggplot(xx) + 
+    geom_line(aes(x = dt_fmt, 
+                  y = strata_rat)) +
+    geom_point(aes(x = dt_fmt, 
+                   y = strata_rat))
+  
+  
+  p1 / p2 / p3
   
   state_df[,  
            keep:=(sum(X_deaths) > 0 & strata_rat < 1.2), 
